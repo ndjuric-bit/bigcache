@@ -152,29 +152,25 @@ func (s *cacheShard) set(key string, hashedKey uint64, entry []byte) error {
 }
 
 func (s *cacheShard) setIfNotExists(key string, hashedKey uint64, entry []byte) (newEntry bool, err error) {
-	s.lock.RLock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	{
 		if previousIndex := s.hashmap[hashedKey]; previousIndex != 0 {
-			s.lock.RUnlock()
 			return false, nil
 		}
 	}
-	s.lock.RUnlock()
-
-	s.lock.Lock()
-	defer s.lock.Unlock()
 	return true, s.addNewWithoutLock(key, hashedKey, entry)
 }
 
 func (s *cacheShard) setOrGet(key string, hashedKey uint64, entry []byte) (actual []byte, loaded bool, err error) {
-	s.lock.RLock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	wrappedEntry, err := s.getWrappedEntry(hashedKey)
 	if err == nil {
 		if entryKey := readKeyFromEntry(wrappedEntry); key == entryKey {
 			actual = readEntry(wrappedEntry)
 			s.hit(hashedKey)
-			s.lock.RUnlock()
 			return actual, true, nil
 		} else {
 
@@ -191,13 +187,9 @@ func (s *cacheShard) setOrGet(key string, hashedKey uint64, entry []byte) (actua
 			resetHashFromEntry(wrappedEntry)
 		}
 	} else if !errors.Is(err, ErrEntryNotFound) {
-		s.lock.RUnlock()
 		return entry, false, err
 	}
 
-	s.lock.RUnlock()
-	s.lock.Lock()
-	defer s.lock.Unlock()
 	return entry, false, s.addNewWithoutLock(key, hashedKey, entry)
 }
 
