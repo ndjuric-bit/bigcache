@@ -125,7 +125,7 @@ func (s *cacheShard) set(key string, hashedKey uint64, entry []byte) error {
 	if previousIndex := s.hashmap[hashedKey]; previousIndex != 0 {
 		if previousEntry, err := s.entries.Get(int(previousIndex)); err == nil {
 			resetHashFromEntry(previousEntry)
-			//remove hashkey
+			// remove hashkey
 			delete(s.hashmap, hashedKey)
 		}
 	}
@@ -152,34 +152,18 @@ func (s *cacheShard) set(key string, hashedKey uint64, entry []byte) error {
 }
 
 func (s *cacheShard) setIfNotExists(key string, hashedKey uint64, entry []byte) (newEntry bool, err error) {
-	currentTimestamp := uint64(s.clock.Epoch())
+	s.lock.RLock()
+	{
+		if previousIndex := s.hashmap[hashedKey]; previousIndex != 0 {
+			s.lock.RUnlock()
+			return false, nil
+		}
+	}
+	s.lock.RUnlock()
 
 	s.lock.Lock()
-
-	if previousIndex := s.hashmap[hashedKey]; previousIndex != 0 {
-		s.lock.Unlock()
-		return false, nil
-	}
-
-	if !s.cleanEnabled {
-		if oldestEntry, err := s.entries.Peek(); err == nil {
-			s.onEvict(oldestEntry, currentTimestamp, s.removeOldestEntry)
-		}
-	}
-
-	w := wrapEntry(currentTimestamp, hashedKey, key, entry, &s.entryBuffer)
-
-	for {
-		if index, err := s.entries.Push(w); err == nil {
-			s.hashmap[hashedKey] = uint64(index)
-			s.lock.Unlock()
-			return true, nil
-		}
-		if s.removeOldestEntry(NoSpace) != nil {
-			s.lock.Unlock()
-			return true, errors.New("entry is bigger than max shard size")
-		}
-	}
+	defer s.lock.Unlock()
+	return true, s.addNewWithoutLock(key, hashedKey, entry)
 }
 
 func (s *cacheShard) addNewWithoutLock(key string, hashedKey uint64, entry []byte) error {
@@ -405,7 +389,7 @@ func (s *cacheShard) capacity() int {
 }
 
 func (s *cacheShard) getStats() Stats {
-	var stats = Stats{
+	stats := Stats{
 		Hits:       atomic.LoadInt64(&s.stats.Hits),
 		Misses:     atomic.LoadInt64(&s.stats.Misses),
 		DelHits:    atomic.LoadInt64(&s.stats.DelHits),
